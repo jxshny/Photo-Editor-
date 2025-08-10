@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Mobile Photo Grader — Single File</title>
+<title>Mobile Photo Grader — Pro Version</title>
 <style>
   :root{
     --bg:#0f1115; --card:#101418; --accent:#1db954; --muted:#9aa3ad;
@@ -15,7 +15,7 @@
   h1{font-size:18px;margin:0}
   .stage{display:flex;flex-direction:column;gap:12px;margin-top:12px}
   .canvas-wrap{background:linear-gradient(180deg,#0b0d10,#101317);border-radius:12px;padding:8px;display:flex;justify-content:center;align-items:center;min-height:320px}
-  canvas{max-width:100%;border-radius:8px;display:block}
+  canvas{max-width:100%;border-radius:8px;display:block;image-rendering: auto;}
   .controls{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
   .row{display:flex;gap:8px;align-items:center}
   label{font-size:12px;color:var(--muted);width:90px}
@@ -52,15 +52,11 @@
     </div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div class="presets" id="presets">
-        <!-- preset buttons injected -->
-      </div>
+      <div class="presets" id="presets"></div>
       <div class="muted small">Tip: try "Teal & Orange" then reduce Saturation slightly</div>
     </div>
 
-    <div class="controls" id="controls">
-      <!-- slider rows injected -->
-    </div>
+    <div class="controls" id="controls"></div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
       <button id="reset" class="preset-btn">Reset</button>
@@ -73,11 +69,6 @@
 </div>
 
 <script>
-/*
- Simple mobile-friendly photo grader using canvas 2D filters + overlays.
- Works fully offline in the browser.
-*/
-
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d',{willReadFrequently:false});
 const fileInput = document.getElementById('file');
@@ -91,17 +82,19 @@ const autoDownload = document.getElementById('autoDownload');
 let img = new Image();
 let state = null;
 
-// Presets: each defines the slider defaults.
+const MAX_WIDTH = 1200;
+const MAX_HEIGHT = 1200;
+
+// More punchy presets
 const PRESETS = {
-  "Clean Edit": {brightness:0, contrast:10, saturation:6, hue:0, warmth:0, vignette:12, grain:8},
-  "Film Warm (Portra style)": {brightness:4, contrast:6, saturation:8, hue:-2, warmth:18, vignette:8, grain:12},
-  "Teal & Orange": {brightness:2, contrast:12, saturation:6, hue:-6, warmth:20, vignette:10, grain:9},
-  "Moody": {brightness:-8, contrast:18, saturation:-6, hue:-4, warmth:6, vignette:28, grain:14},
-  "High-Contrast B&W": {brightness:-2, contrast:26, saturation:-100, hue:0, warmth:0, vignette:18, grain:18},
-  "Bleach Bypass": {brightness:-2, contrast:28, saturation:-18, hue:-4, warmth:0, vignette:6, grain:14}
+  "Clean Edit": {brightness:5, contrast:20, saturation:18, hue:0, warmth:4, vignette:20, grain:12},
+  "Film Warm (Portra style)": {brightness:8, contrast:18, saturation:24, hue:-2, warmth:26, vignette:14, grain:18},
+  "Teal & Orange": {brightness:10, contrast:30, saturation:26, hue:-10, warmth:28, vignette:16, grain:14},
+  "Moody": {brightness:-4, contrast:34, saturation:-18, hue:-6, warmth:10, vignette:38, grain:24},
+  "High-Contrast B&W": {brightness:-4, contrast:40, saturation:-100, hue:0, warmth:0, vignette:22, grain:26},
+  "Bleach Bypass": {brightness:-4, contrast:38, saturation:-24, hue:-6, warmth:0, vignette:14, grain:20}
 };
 
-// Sliders meta
 const SLIDERS = [
   {key:'brightness', label:'Exposure', min:-40, max:40, step:1},
   {key:'contrast', label:'Contrast', min:-50, max:50, step:1},
@@ -112,7 +105,6 @@ const SLIDERS = [
   {key:'grain', label:'Grain', min:0, max:40, step:1}
 ];
 
-// init UI
 function createPresetsUI(){
   for(const name of Object.keys(PRESETS)){
     const btn = document.createElement('button');
@@ -154,18 +146,25 @@ function updateStateFromControls(){
   state = Object.assign({}, readControls());
 }
 
-// Image load & canvas sizing
 function loadImageFromFile(file){
   const url = URL.createObjectURL(file);
   img = new Image();
   img.onload = () => {
     placeholder.style.display='none';
-    // fit canvas to device width while keeping ratio (cap width for performance)
-    const maxW = Math.min(window.innerWidth*0.98, 1800);
-    const scale = Math.min(1, maxW / img.width);
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    // default state
+
+    // Maintain aspect ratio and limit size for quality
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    const scale = Math.min(MAX_WIDTH / w, MAX_HEIGHT / h, 1);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+    canvas.width = w;
+    canvas.height = h;
+
+    // Set smoothing for crisp scaling
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     state = Object.assign({}, PRESETS['Clean Edit']);
     setControls(state);
     render();
@@ -190,31 +189,28 @@ function resetAll(){
   render();
 }
 
-// main render: use ctx.filter for brightness/contrast/saturate/hue/sepia
 function render(){
   if(!img || !img.src) return;
-  // build filter chain
-  // convert slider numbers to CSS filter parameters
-  const b = 1 + (state.brightness/50);        // range ~0.2 - 1.8
-  const c = 1 + (state.contrast/40);          // range ~0 - 2.25
-  const s = 1 + (state.saturation/60);        // range ~- +2
-  const hr = (state.hue * 3.5) + 'deg';       // scaled
-  // warmth -> map [-40..40] to sepia amount (0..0.6) and a tiny hue-shift
+
+  // Filters calculation for CSS filter chain
+  const b = 1 + (state.brightness/50);
+  const c = 1 + (state.contrast/40);
+  const s = 1 + (state.saturation/60);
+  const hr = (state.hue * 3.5) + 'deg';
   const sep = Math.max(0, state.warmth/80);
   const warmthHue = (state.warmth * 0.6) + 'deg';
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // draw base with filter
+
   ctx.save();
   ctx.filter = `brightness(${(b*100).toFixed(0)}%) contrast(${(c*100).toFixed(0)}%) saturate(${(s*100).toFixed(0)}%) hue-rotate(${hr}) sepia(${sep})`;
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   ctx.restore();
 
-  // apply vignette as radial gradient multiply
+  // Vignette
   if(state.vignette > 0){
     const vig = state.vignette/100;
     ctx.save();
-    // create gradient
     const cx = canvas.width/2, cy = canvas.height/2;
     const rad = Math.max(canvas.width, canvas.height) * (0.6 + vig*0.6);
     const g = ctx.createRadialGradient(cx, cy, rad*0.15, cx, cy, rad);
@@ -228,21 +224,20 @@ function render(){
     ctx.restore();
   }
 
-  // add grain overlay
+  // Grain overlay
   if(state.grain > 0){
-    const grainAmount = state.grain; // 0-40
-    // create small noise canvas and scale
+    const grainAmount = state.grain;
     const gW = 256, gH = Math.round(256 * (canvas.height/canvas.width));
     const off = document.createElement('canvas'); off.width = gW; off.height = gH;
     const og = off.getContext('2d');
     const imageData = og.createImageData(gW, gH);
     const data = imageData.data;
-    for(let i=0;i<data.length;i+=4){
-      const v = 128 + (Math.random()*255-128) * (grainAmount/60);
-      data[i]=data[i+1]=data[i+2]=v;
-      data[i+3]= (40 * (grainAmount/40)); // alpha
+    for(let i=0; i<data.length; i+=4){
+      const v = 128 + (Math.random()*255 - 128) * (grainAmount/60);
+      data[i] = data[i+1] = data[i+2] = v;
+      data[i+3] = (40 * (grainAmount/40));
     }
-    og.putImageData(imageData,0,0);
+    og.putImageData(imageData, 0, 0);
     ctx.save();
     ctx.globalAlpha = 0.06 + (grainAmount/220);
     ctx.globalCompositeOperation = 'overlay';
@@ -252,7 +247,6 @@ function render(){
   }
 }
 
-// Download edited image
 function downloadEdited(){
   const link = document.createElement('a');
   link.href = canvas.toDataURL('image/jpeg', 0.92);
@@ -260,35 +254,30 @@ function downloadEdited(){
   link.click();
 }
 
-// events
-chooseBtn.addEventListener('click', ()=> fileInput.click());
+chooseBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
   if(e.target.files && e.target.files[0]) loadImageFromFile(e.target.files[0]);
 });
 downloadBtn.addEventListener('click', downloadEdited);
 resetBtn.addEventListener('click', resetAll);
 
-// wire up keyboard/tap friendly controls
 createPresetsUI();
 createControlsUI();
 
-// initialize default values visually
 state = Object.assign({}, PRESETS['Clean Edit']);
 setControls(state);
 
-// optional: allow pinch-zoom on canvas? (Left for future)
-
-// responsiveness: redraw on resize to keep canvas crisp
 window.addEventListener('resize', () => {
   if(!img.src) return;
-  // re-scale canvas while keeping current settings
-  const maxW = Math.min(window.innerWidth*0.98, 1800);
-  const scale = Math.min(1, maxW / img.naturalWidth);
+  const maxW = Math.min(window.innerWidth*0.98, MAX_WIDTH);
+  const maxH = Math.min(window.innerHeight*0.98, MAX_HEIGHT);
+  const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
   canvas.width = Math.round(img.naturalWidth * scale);
   canvas.height = Math.round(img.naturalHeight * scale);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   render();
 });
-
 </script>
 </body>
 </html>
